@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+#
+# agentbox - run a coding agent inside a scoped container.
+#
+# A profile fixes the image, the mounts, the network, the secrets and the
+# privilege tier. Callers choose a profile and a task, nothing else: the caller
+# is usually an LLM, so anything it could pass on the command line is not a
+# boundary. Privilege and scope are profile properties by design.
+set -euo pipefail
+
+AGENTBOX_ROOT="${AGENTBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+if [ -n "${AGENTBOX_PROFILE_DIR:-}" ]; then
+  PROFILE_DIR="$AGENTBOX_PROFILE_DIR"
+elif [ -d "${XDG_CONFIG_HOME:-$HOME/.config}/agentbox/profiles" ]; then
+  PROFILE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agentbox/profiles"
+else
+  PROFILE_DIR="$AGENTBOX_ROOT/profiles"
+fi
+IMAGE_DIR="$AGENTBOX_ROOT/images"
+STATE_DIR="${AGENTBOX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agentbox}"
+
+die() { printf 'agentbox: %s\n' "$*" >&2; exit 1; }
+note() { printf 'agentbox: %s\n' "$*" >&2; }
+
+# ---------------------------------------------------------------- profiles
+
+load_profile() {
+  case "$1" in ""|*[!a-zA-Z0-9_.-]*|.*) die "invalid profile name '$1'";; esac
+  local name=$1 file="$PROFILE_DIR/$1.sh"
+  [ -f "$file" ] || die "no such profile '$name' (looked in $PROFILE_DIR)"
+
+  # Defaults every profile inherits.
+  DESC=""; IMAGE=""; AGENT="claude"; PRIVILEGE="none"; NETWORK="bridge"
+  MOUNTS=(); RO_MOUNTS=(); VAULT_SECRETS=(); PASS_ENV=(); STATIC_ENV=()
+  AUTH_VOLUME=""; WORKDIR=""; DOCKER_EXTRA=(); PASEO_PROVIDER=""
+
+  # shellcheck source=/dev/null
+  . "$file"
+  PROFILE_NAME=$name
+
+  [ -n "$IMAGE" ] || die "profile '$name' sets no IMAGE"
+  case "$AGENT" in claude|codex) ;; *) die "profile '$name': AGENT must be claude or codex, got '$AGENT'";; esac
+  case "$PRIVILEGE" in none|sudo|root) ;; *) die "profile '$name': PRIVILEGE must be none, sudo or root, got '$PRIVILEGE'";; esac
+  AUTH_VOLUME="${AUTH_VOLUME:-agentbox-$AGENT-shared}"
+}
+
+# Resolve secrets before starting Docker. Passing only variable names keeps
+# values out of argv, handles multiline values, and fails closed on Vault errors.
+load_runtime_environment() {
+  ENV_ARGS=()
+  local entry key ref path field value var
+  for entry in ${STATIC_ENV[@]+"${STATIC_ENV[@]}"}; do
+    key=${entry%%=*}; value=${entry#*=}
+    [ "$key" != "$entry" ] || die "STATIC_ENV entry must be KEY=value"
+    case "$key" in ""|[0-9]*|*[!a-zA-Z0-9_]*) die "invalid environment variable name";; esac
+    export "$key=$value"
+    ENV_ARGS+=(--env "$key")
+  done
+  for var in ${PASS_ENV[@]+"${PASS_ENV[@]}"}; do
+    case "$var" in ""|[0-9]*|*[!a-zA-Z0-9_]*) die "invalid environment variable name";; esac
+    if [ -n "${!var:-}" ]; then ENV_ARGS+=(--env "$var"); fi
+  done
+  for entry in ${VAULT_SECRETS[@]+"${VAULT_SECRETS[@]}"}; do
+    key=${entry%%=*}; ref=${entry#*=}; path=${ref%%#*}; field=${ref##*#}
+    [ "$key" != "$entry" ] && [ "$path" != "$ref" ] || die "VAULT_SECRETS must be KEY=path#field"
+    case "$key" in ""|[0-9]*|*[!a-zA-Z0-9_]*) die "invalid secret environment variable name";; esac
+    command -v vault >/dev/null || die "VAULT_SECRETS needs the vault CLI"
+    value=$(vault kv get -field="$field" "$path") || die "vault read failed for $path#$field"
+    export "$key=$value"
+    ENV_ARGS+=(--env "$key")
+  done
+}
+
+cmd_profiles() {
+  local f
+  for f in "$PROFILE_DIR"/*.sh; do
+    [ -e "$f" ] || die "no profiles in $PROFILE_DIR"
+    ( load_profile "$(basename "$f" .sh)"
+      printf '%-10s %-7s %-6s %-28s %s\n' \
+        "$PROFILE_NAME" "$AGENT" "$PRIVILEGE" "$IMAGE" "$DESC" )
+  done
+}
+
+# ---------------------------------------------------------------- run
+
+privilege_args() {
+  local uid gid
+  case "$PRIVILEGE" in
+    none|sudo)
+      # On Linux the container uid must own the mounted worktree or the agent
+      # cannot write to it. On macOS the uid is translated, so use the image's.
+      if [ "$(uname -s)" = Linux ]; then
+        uid=$(id -u); gid=$(id -g)
+        printf '%s\n' --user "$uid:$gid"
+        # Explicit UID:GID suppresses supplementary groups from /etc/group.
+        [ "$PRIVILEGE" != sudo ] || printf '%s\n' --group-add sudo
+        if [ "$uid" != 1000 ]; then
+          note "host uid $uid != image uid 1000; rebuild with --build-arg AGENT_UID=$uid so \$HOME and sudo resolve"
+        fi
+      fi
+      ;;
+    root)
+      printf '%s\n' --user 0:0
+      # Claude Code refuses --dangerously-skip-permissions as root unless the
+      # environment declares itself externally sandboxed. Codex does not care.
+      [ "$AGENT" = claude ] && printf '%s\n' --env IS_SANDBOX=1
+      ;;
+  esac
+}
+
+agent_argv() {
+  local task=$1
+  case "$AGENT" in
+    claude)
+      # stdout is the final answer, stderr is diagnostics.
+      printf '%s\n' claude -p --dangerously-skip-permissions "$task"
+      ;;
+    codex)
+      # codex prints its transcript to stdout; route that to stderr and put only
+      # the last message on stdout so both agents look the same to a caller.
+      printf '%s\n' bash -c \
+        'codex exec --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o /tmp/agentbox-last "$1" 1>&2 </dev/null; status=$?; [ -f /tmp/agentbox-last ] && cat /tmp/agentbox-last; exit $status' \
+        agentbox "$task"
+      ;;
+  esac
+}
+
+build_docker_args() {
+  local m
+  DOCKER_ARGS=(run --init --network "$NETWORK")
+  # No --interactive: the task comes in as an argument, and an open piped stdin
+  # makes codex wait on more input. Only `shell` attaches stdin.
+  if [ "$DETACH" = 1 ]; then
+    # Deliberately no --rm: it would delete the container the moment the task
+    # finishes, taking the logs with it before anyone reads them. `agentbox
+    # clean` reaps them instead.
+    DOCKER_ARGS+=(--detach --name "$RUN_NAME")
+  else
+    DOCKER_ARGS+=(--rm)
+  fi
+
+  # Read line-by-line rather than with mapfile: /usr/bin/env bash is 3.2 on a
+  # stock macOS and the daemon that launches us may not have brew's bash first.
+  local line
+  while IFS= read -r line; do DOCKER_ARGS+=("$line"); done < <(privilege_args)
+
+  # Auth: the CLIs refresh tokens, so these mount read-write.
+  case "$AGENT" in
+    claude) DOCKER_ARGS+=(--volume "$AUTH_VOLUME:/home/agent/.claude");;
+    codex)  DOCKER_ARGS+=(--volume "$AUTH_VOLUME:/home/agent/.codex");;
+  esac
+
+  # Repo scope. A git worktree's .git is an absolute gitdir pointer, so mount the
+  # directory holding both the main checkout and its worktrees, at the same path.
+  for m in ${MOUNTS[@]+"${MOUNTS[@]}"}; do
+    [ -d "$m" ] || die "profile '$PROFILE_NAME': MOUNTS path does not exist: $m"
+    DOCKER_ARGS+=(--volume "$m:$m")
+  done
+  for m in ${RO_MOUNTS[@]+"${RO_MOUNTS[@]}"}; do
+    [ -d "$m" ] || die "profile '$PROFILE_NAME': RO_MOUNTS path does not exist: $m"
+    DOCKER_ARGS+=(--volume "$m:$m:ro")
+  done
+
+  if [ -n "$WORKDIR" ]; then
+    DOCKER_ARGS+=(--workdir "$WORKDIR")
+  elif [ ${#MOUNTS[@]} -gt 0 ]; then
+    DOCKER_ARGS+=(--workdir "${MOUNTS[0]}")
+  fi
+
+  DOCKER_ARGS+=(${DOCKER_EXTRA[@]+"${DOCKER_EXTRA[@]}"})
+}
+
+cmd_run() {
+  DETACH=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --detach|-d) DETACH=1; shift;;
+      --) shift; break;;
+      -*) die "unknown option '$1'";;
+      *) break;;
+    esac
+  done
+  local profile=${1:-} task=${2:-}
+  [ -n "$profile" ] || die "usage: agentbox run [--detach] <profile> \"<task>\""
+  [ -n "$task" ] || die "usage: agentbox run [--detach] <profile> \"<task>\""
+
+  load_profile "$profile"
+  RUN_NAME="agentbox-$profile-$(date +%s)-$$"
+  build_docker_args
+
+  local -a argv=()
+  local line
+  while IFS= read -r line; do argv+=("$line"); done < <(agent_argv "$task")
+
+  if [ "$DETACH" = 1 ]; then
+    mkdir -p "$STATE_DIR"
+    load_runtime_environment
+    docker "${DOCKER_ARGS[@]}" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$IMAGE" "${argv[@]}" >/dev/null
+    printf '%s\n' "$RUN_NAME"
+    note "follow with: agentbox logs $RUN_NAME"
+  else
+    load_runtime_environment
+    docker "${DOCKER_ARGS[@]}" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$IMAGE" "${argv[@]}"
+  fi
+}
+
+# A shell in the box with the profile's exact scope and secrets. For debugging a
+# profile by hand, not for agents.
+cmd_shell() {
+  local profile=${1:?usage: agentbox shell <profile>}
+  load_profile "$profile"
+  DETACH=0; RUN_NAME=""
+  build_docker_args
+  DOCKER_ARGS+=(--interactive --tty)
+  load_runtime_environment
+  docker "${DOCKER_ARGS[@]}" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$IMAGE" bash
+}
+
+cmd_login() {
+  local profile=${1:?usage: agentbox login <profile>}
+  load_profile "$profile"
+  local mount
+  case "$AGENT" in
+    claude) mount="$AUTH_VOLUME:/home/agent/.claude";;
+    codex)  mount="$AUTH_VOLUME:/home/agent/.codex";;
+  esac
+  note "logging $AGENT into volume $AUTH_VOLUME (shared by every profile using it)"
+  case "$AGENT" in
+    claude) docker run --rm -it --volume "$mount" "$IMAGE" claude /login;;
+    codex)  docker run --rm -it --volume "$mount" "$IMAGE" codex login;;
+  esac
+}
+
+cmd_logs() {
+  local name=${1:?usage: agentbox logs <run-name>}
+  shift
+  case "$name" in
+    agentbox-*) docker logs -f "$name" "$@";;
+    *) paseo logs "$name" "$@";;
+  esac
+}
+
+# Visible mode: Paseo owns the agent lifecycle and selects our container shim.
+cmd_spawn() {
+  local detached=0
+  if [ "${1:-}" = --detach ] || [ "${1:-}" = -d ]; then detached=1; shift; fi
+  local profile=${1:-} task=${2:-}
+  [ -n "$profile" ] && [ -n "$task" ] || die 'usage: agentbox spawn [--detach] <profile> "<task>"'
+  load_profile "$profile"
+  [ -n "$PASEO_PROVIDER" ] || die "profile '$profile' has no PASEO_PROVIDER; use agentbox run for CLI-only profiles"
+  command -v paseo >/dev/null || die "Paseo CLI not found"
+  local -a options=(--provider "$PASEO_PROVIDER" --title "[box:$profile] ${task:0:60}" --json)
+  if [ -n "${PASEO_WORKSPACE_ID:-}" ]; then
+    options+=(--workspace "$PASEO_WORKSPACE_ID")
+  else
+    options+=(--cwd "${WORKDIR:-$PWD}")
+  fi
+  [ "$detached" = 0 ] || options+=(--no-wait)
+  paseo run "${options[@]}" -- "$task"
+}
+
+cmd_status() {
+  local name=${1:?usage: agentbox status <run-name-or-agent-id>}
+  case "$name" in
+    agentbox-*) docker inspect --format '{{json .State}}' "$name";;
+    *) paseo inspect "$name" --json | python3 -c '
+import json,subprocess,sys
+data=json.load(sys.stdin)
+result=subprocess.run(["docker","ps","-a","--filter","label=agentbox.agent="+data["Id"],"--format","{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}"],capture_output=True,text=True,check=True)
+data["Containers"]=[dict(zip(["id","name","image","state"],line.split("\t",3))) for line in result.stdout.splitlines()]
+print(json.dumps(data,indent=2))';;
+  esac
+}
+
+cmd_stop() {
+  local name=${1:?usage: agentbox stop <run-name-or-agent-id>}
+  case "$name" in agentbox-*) docker stop "$name";; *) paseo stop "$name";; esac
+}
+
+cmd_ps() {
+  docker ps -a --filter 'name=agentbox-' \
+    --format 'table {{.Names}}\t{{.Label "agentbox.agent"}}\t{{.Status}}\t{{.Image}}'
+}
+
+# Detached runs keep their container so the logs outlive the task. Reap the
+# finished ones.
+cmd_clean() {
+  local ids
+  ids=$(docker ps -aq --filter 'name=agentbox-' --filter status=exited)
+  if [ -z "$ids" ]; then note "nothing to clean"; return 0; fi
+  # shellcheck disable=SC2086
+  docker rm $ids
+}
+
+cmd_doctor() {
+  local profile=${1:?usage: agentbox doctor <profile>}
+  load_profile "$profile"
+  local ok=0
+
+  printf 'profile    %s (%s)\n' "$PROFILE_NAME" "$DESC"
+  printf 'agent      %s\n' "$AGENT"
+  printf 'image      %s\n' "$IMAGE"
+  printf 'privilege  %s\n' "$PRIVILEGE"
+  printf 'network    %s\n' "$NETWORK"
+
+  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    printf 'image      present\n'
+  else
+    printf 'image      MISSING - run: agentbox build\n'; ok=1
+  fi
+
+  if [ "$PRIVILEGE" = sudo ]; then
+    if docker run --rm --entrypoint sh "$IMAGE" -c 'command -v sudo >/dev/null'; then
+      printf 'sudo       present in image\n'
+    else
+      printf 'sudo       MISSING - PRIVILEGE=sudo needs an image built from images/sudo\n'; ok=1
+    fi
+  fi
+
+  if [ -d "$AUTH_VOLUME" ] || docker volume inspect "$AUTH_VOLUME" >/dev/null 2>&1; then
+    printf 'auth       volume %s exists\n' "$AUTH_VOLUME"
+  else
+    printf 'auth       volume %s MISSING - run: agentbox login %s\n' "$AUTH_VOLUME" "$PROFILE_NAME"; ok=1
+  fi
+
+  local m
+  for m in ${MOUNTS[@]+"${MOUNTS[@]}"} ${RO_MOUNTS[@]+"${RO_MOUNTS[@]}"}; do
+    if [ -d "$m" ]; then printf 'mount      %s ok\n' "$m"
+    else printf 'mount      %s MISSING\n' "$m"; ok=1; fi
+  done
+
+  if [ ${#VAULT_SECRETS[@]} -gt 0 ]; then
+    if command -v vault >/dev/null; then
+      local entry ref path field
+      for entry in "${VAULT_SECRETS[@]}"; do
+        ref=${entry#*=}; path=${ref%%#*}; field=${ref##*#}
+        if vault kv get -field="$field" "$path" >/dev/null 2>&1; then
+          printf 'secret     %s readable\n' "$entry"
+        else
+          printf 'secret     %s UNREADABLE\n' "$entry"; ok=1
+        fi
+      done
+    else
+      printf 'secret     vault CLI MISSING but profile declares %d secret(s)\n' "${#VAULT_SECRETS[@]}"; ok=1
+    fi
+  fi
+
+  return $ok
+}
+
+cmd_build() {
+  local uid=1000 gid=1000
+  if [ "$(uname -s)" = Linux ]; then uid=$(id -u); gid=$(id -g); fi
+  local targets=("$@")
+  [ ${#targets[@]} -gt 0 ] || targets=(base sudo gcloud gcloud-sudo nvm nvm-sudo)
+
+  local t
+  for t in "${targets[@]}"; do
+    case "$t" in
+      base)
+        note "building agentbox/base (uid $uid)"
+        docker build -t agentbox/base:latest \
+          --build-arg "AGENT_UID=$uid" --build-arg "AGENT_GID=$gid" "$IMAGE_DIR/base";;
+      sudo)
+        note "building agentbox/sudo"
+        docker build -t agentbox/sudo:latest \
+          --build-arg BASE=agentbox/base:latest "$IMAGE_DIR/sudo";;
+      gcloud)
+        note "building agentbox/gcloud"
+        docker build -t agentbox/gcloud:latest \
+          --build-arg BASE=agentbox/base:latest "$IMAGE_DIR/gcloud";;
+      gcloud-sudo)
+        note "building agentbox/gcloud-sudo"
+        docker build -t agentbox/gcloud-sudo:latest \
+          --build-arg BASE=agentbox/sudo:latest "$IMAGE_DIR/gcloud";;
+      nvm)
+        note "building agentbox/nvm"
+        docker build -t agentbox/nvm:latest \
+          --build-arg BASE=agentbox/base:latest "$IMAGE_DIR/nvm";;
+      nvm-sudo)
+        note "building agentbox/nvm-sudo"
+        docker build -t agentbox/nvm-sudo:latest \
+          --build-arg BASE=agentbox/sudo:latest "$IMAGE_DIR/nvm";;
+      *) die "unknown build target '$t'";;
+    esac
+  done
+}
+
+usage() {
+  cat <<'EOF'
+agentbox - run a coding agent inside a scoped container
+
+  agentbox profiles                      list profiles
+  agentbox build [target...]             build images (base sudo gcloud gcloud-sudo nvm nvm-sudo)
+  agentbox login <profile>               interactive login into the profile's auth volume
+  agentbox doctor <profile>              check image, sudo, auth volume, mounts, secrets
+  agentbox run [--detach] <profile> "<task>"
+  agentbox spawn [--detach] <profile> "<task>"  visible in Paseo
+  agentbox status <run-name-or-agent-id>
+  agentbox wait <agent-id> [--timeout SECONDS]
+  agentbox stop <run-name-or-agent-id>
+  agentbox archive <agent-id>              release runtime, retain history
+  agentbox shell <profile>               interactive shell with the profile's scope
+  agentbox logs <run-name>               follow a detached run
+  agentbox ps                            list runs
+  agentbox clean                         remove finished detached runs
+
+Privilege is set by the profile (none | sudo | root), never by the caller.
+EOF
+}
+
+# Provider mode sources the helpers without dispatching a CLI command.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
+
+case "${1:-}" in
+  profiles) shift; cmd_profiles "$@";;
+  build)    shift; cmd_build "$@";;
+  login)    shift; cmd_login "$@";;
+  doctor)   shift; cmd_doctor "$@";;
+  run)      shift; cmd_run "$@";;
+  spawn)    shift; cmd_spawn "$@";;
+  status)   shift; cmd_status "$@";;
+  wait)     shift; paseo wait "$@";;
+  stop)     shift; cmd_stop "$@";;
+  archive)  shift; paseo archive "$@";;
+  shell)    shift; cmd_shell "$@";;
+  logs)     shift; cmd_logs "$@";;
+  ps)       shift; cmd_ps "$@";;
+  clean)    shift; cmd_clean "$@";;
+  ""|-h|--help|help) usage;;
+  *) usage; exit 2;;
+esac

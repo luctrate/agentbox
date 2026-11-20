@@ -1,0 +1,23 @@
+# Credentials, generated configuration and local experiments
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+profiles/local-*.sh
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Private deployment records retained locally; never publish these.
+HANDOFF.md
+docs/vm-deployment.md
+deploy/install-vm.py
+deploy/install-bridge-proxy.py
+deploy/enable-paseo-vm.py
+tests/audit-vm.py
+tests/live-vm.py
+tests/live-lifecycle.py

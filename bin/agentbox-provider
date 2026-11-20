@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Keep the native Claude SDK / Codex app-server protocol intact inside Docker.
+set -euo pipefail
+ROOT="${AGENTBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+. "$ROOT/bin/agentbox"
+
+if [ "${1:-}" = --profile ]; then
+  [ $# -ge 2 ] || die "--profile requires a profile name"
+  load_profile "$2"
+  shift 2
+else
+  # Compatibility with the original handoff's env-only Claude provider.
+  IMAGE="${AGENTBOX_IMAGE:?AGENTBOX_IMAGE is required}"
+  AGENT="${AGENTBOX_AGENT:-claude}"
+  PRIVILEGE="${AGENTBOX_PRIVILEGE:-none}"
+  NETWORK="${AGENTBOX_NETWORK:-bridge}"
+  MOUNTS=(); RO_MOUNTS=(); DOCKER_EXTRA=(); STATIC_ENV=(); VAULT_SECRETS=(); PASS_ENV=()
+  [ -z "${AGENTBOX_MOUNT_ROOT:-}" ] || MOUNTS+=("$AGENTBOX_MOUNT_ROOT")
+  PROFILE_NAME="$AGENT"
+fi
+case "$PRIVILEGE" in none|sudo|root) ;; *) die "invalid privilege tier '$PRIVILEGE'";; esac
+case "$AGENT" in
+  claude) CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; CONFIG_VAR=CLAUDE_CONFIG_DIR;;
+  codex) CFG="${CODEX_HOME:-$HOME/.codex}"; CONFIG_VAR=CODEX_HOME;;
+  *) die "AGENT must be claude or codex";;
+esac
+[ -d "$CFG" ] || die "$CONFIG_VAR does not exist: $CFG"
+name="agentbox-provider-$AGENT-$(date +%s)-$$"
+args=(run --rm -i --init --name "$name" --label agentbox.managed=provider
+      --label "agentbox.agent=${PASEO_AGENT_ID:-unscoped}"
+      --label "agentbox.profile=$PROFILE_NAME" --network "$NETWORK"
+      --volume "$CFG:$CFG" --env "$CONFIG_VAR=$CFG" --workdir "$PWD")
+while IFS= read -r line; do args+=("$line"); done < <(privilege_args)
+for path in ${MOUNTS[@]+"${MOUNTS[@]}"}; do
+  [ -d "$path" ] || die "mount is not a directory: $path"
+  args+=(--volume "$path:$path")
+done
+for path in ${RO_MOUNTS[@]+"${RO_MOUNTS[@]}"}; do
+  [ -d "$path" ] || die "read-only mount is not a directory: $path"
+  args+=(--volume "$path:$path:ro")
+done
+args+=(${DOCKER_EXTRA[@]+"${DOCKER_EXTRA[@]}"})
+# Forward the SDK contract and explicit profile values, never the daemon password.
+while IFS='=' read -r key _; do
+  case "$key" in
+    CLAUDE_*|ANTHROPIC_*|OPENAI_*|CODEX_*|NODE_EXTRA_CA_CERTS|GIT_SSL_CAINFO|SSL_CERT_FILE|REQUESTS_CA_BUNDLE)
+      args+=(--env "$key");;
+  esac
+done < <(env)
+load_runtime_environment
+args+=(${ENV_ARGS[@]+"${ENV_ARGS[@]}"} --add-host=host.docker.internal:host-gateway)
+host_alias="${AGENTBOX_DAEMON_HOST:-host.docker.internal}"
+if [ -n "${AGENTBOX_DRY_RUN:-}" ]; then
+  printf 'docker'; printf ' %q' "${args[@]}" "$IMAGE" "$AGENT" "$@"; printf '\n'
+  exit 0
+fi
+exec python3 "$ROOT/bin/agentbox-stdio-proxy" "$host_alias" "$name" -- docker "${args[@]}" "$IMAGE" "$AGENT" "$@"
