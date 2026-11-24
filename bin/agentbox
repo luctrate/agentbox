@@ -390,6 +390,7 @@ usage() {
   cat <<'EOF'
 agentbox - run a coding agent inside a scoped container
 
+  agentbox catalog <validate|plan|apply|status>   manage asp.now agent catalogs
   agentbox profiles                      list profiles
   agentbox build [target...]             build images (base sudo gcloud gcloud-sudo nvm nvm-sudo)
   agentbox login <profile>               interactive login into the profile's auth volume
@@ -398,6 +399,7 @@ agentbox - run a coding agent inside a scoped container
   agentbox spawn [--detach] <profile> "<task>"  visible in Paseo
   agentbox status <run-name-or-agent-id>
   agentbox wait <agent-id> [--timeout SECONDS]
+  agentbox send <agent-id> "<message>"    follow up in the same Paseo conversation
   agentbox stop <run-name-or-agent-id>
   agentbox archive <agent-id>              release runtime, retain history
   agentbox shell <profile>               interactive shell with the profile's scope
@@ -413,6 +415,7 @@ EOF
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
 case "${1:-}" in
+  catalog)  shift; exec "${AGENTBOX_CATALOG_PYTHON:-python3}" "$AGENTBOX_ROOT/deploy/catalog.py" "$@";;
   profiles) shift; cmd_profiles "$@";;
   build)    shift; cmd_build "$@";;
   login)    shift; cmd_login "$@";;
@@ -421,6 +424,7 @@ case "${1:-}" in
   spawn)    shift; cmd_spawn "$@";;
   status)   shift; cmd_status "$@";;
   wait)     shift; paseo wait "$@";;
+  send)     shift; paseo send --behavior steer --no-wait --json -- "$@";;
   stop)     shift; cmd_stop "$@";;
   archive)  shift; paseo archive "$@";;
   shell)    shift; cmd_shell "$@";;

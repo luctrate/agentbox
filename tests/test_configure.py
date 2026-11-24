@@ -70,6 +70,17 @@ class ConfigureTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual(json.loads(self.config.read_text()),self.original)
 
+    def test_legacy_helper_rejects_restricted_provider_without_reenabling_mcp(self):
+        self.original['daemon']['mcp']={'injectIntoAgents':False}
+        self.original['agents']['providers']['manager-codex']={
+            'command':['/opt/agentbox/security/provider.py','--policy','/etc/agentbox/policy.json','--role','manager-codex']}
+        self.config.write_text(json.dumps(self.original))
+        r=self.run_configure('--apply')
+        self.assertNotEqual(r.returncode,0)
+        self.assertIn('Restricted/catalog providers detected',r.stderr)
+        self.assertEqual(json.loads(self.config.read_text()),self.original)
+        self.assertFalse(self.output.exists())
+
     def test_custom_profile_is_not_overwritten(self):
         profile=self.output/'profiles/claude.sh'
         profile.parent.mkdir(parents=True)

@@ -1,0 +1,66 @@
+{
+  "host_home": "/home/paseo",
+  "uid": 1000,
+  "gid": 1000,
+  "roots": [
+    "/srv/agentbox/workspaces",
+    "/srv/agentbox/worktrees"
+  ],
+  "control_socket": "/run/agentbox-broker/control.sock",
+  "state": "/var/lib/agentbox-broker/state.json",
+  "listen": "172.30.10.1",
+  "port": 6768,
+  "broker_url": "http://172.30.10.1:6768",
+  "client": "/opt/agentbox/security/client.py",
+  "max_workers": 8,
+  "vault_addr": "https://vault.example.org:8200",
+  "vault_cacert": "/etc/ssl/certs/ca-certificates.crt",
+  "ca_mounts": [
+    "/etc/ssl/certs/ca-certificates.crt"
+  ],
+  "ca_env": {},
+  "deny_public_ips": [],
+  "provider_command": "/opt/agentbox/security/provider.py",
+  "policy_path": "/etc/agentbox/security.json",
+  "network_readiness": {
+    "path": "/etc/agentbox/catalog/network-ready.json"
+  },
+  "authRefs": {
+    "manager-claude": "/var/lib/agentbox-auth/manager-claude",
+    "manager-codex": "/var/lib/agentbox-auth/manager-codex",
+    "worker-claude": "/var/lib/agentbox-auth/worker-claude",
+    "worker-codex": "/var/lib/agentbox-auth/worker-codex",
+    "worker-gitlab": "/var/lib/agentbox-auth/worker-gitlab"
+  },
+  "providerBindings": {
+    "manager-claude": "manager-claude",
+    "manager-codex": "manager-codex",
+    "claude": "claude-box",
+    "codex": "codex-box",
+    "gitlab": "agentbox-gitlab"
+  },
+  "networkBindings": {
+    "managers": {
+      "name": "asp-managers",
+      "subnet": "172.30.10.0/24",
+      "gateway": "172.30.10.1",
+      "bridge": "asp-managers"
+    },
+    "public-workers": {
+      "name": "asp-workers",
+      "subnet": "172.30.11.0/24",
+      "gateway": "172.30.11.1",
+      "bridge": "asp-workers"
+    },
+    "gitlab-workers": {
+      "name": "asp-gitlab",
+      "subnet": "172.30.12.0/24",
+      "gateway": "172.30.12.1",
+      "bridge": "asp-gitlab"
+    }
+  },
+  "network_command": [
+    "/usr/bin/python3",
+    "/opt/agentbox/security/network.py"
+  ]
+}

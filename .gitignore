@@ -21,3 +21,20 @@ deploy/enable-paseo-vm.py
 tests/audit-vm.py
 tests/live-vm.py
 tests/live-lifecycle.py
+
+# Local catalog tooling and durable runtime state
+.venv/
+*.sqlite3
+*.sqlite3-*
+platform.local.json
+catalog.local.yaml
+catalog.local.yml
+
+# Local model/tool login state and generated deployment evidence
+.claude/
+.codex/
+.ssh/
+auth.json
+.vault-token
+*.mobileconfig
+*-verification.json

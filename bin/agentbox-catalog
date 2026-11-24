@@ -1,0 +1,4 @@
+#!/bin/sh
+# Install this reviewed wrapper root-owned at /usr/local/sbin/agentbox-catalog.
+# Adapt the fixed protected prefix here if your installation uses another path.
+exec /opt/agentbox/.venv/bin/python -I /opt/agentbox/deploy/catalog.py "$@"

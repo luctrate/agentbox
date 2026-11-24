@@ -1,0 +1,2 @@
+# Install only into the protected proxy venv; catalog/test dependencies are separate.
+mitmproxy==12.3.1

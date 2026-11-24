@@ -1,0 +1,26 @@
+# Match User/Group/HOME and ReadWritePaths to your trusted platform bindings.
+[Unit]
+Description=Agentbox scoped worker broker
+Requires=agentbox-network.service
+After=agentbox-network.service
+Before=paseo.service
+
+[Service]
+User=paseo
+Group=paseo
+Environment=HOME=/home/paseo
+WorkingDirectory=/home/paseo
+ExecStart=/usr/bin/python3 /opt/agentbox/security/broker.py --config /etc/agentbox/security.json
+RuntimeDirectory=agentbox-broker
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agentbox-broker /run/agentbox-broker
+
+[Install]
+WantedBy=multi-user.target

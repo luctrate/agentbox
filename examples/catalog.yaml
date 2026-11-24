@@ -1,0 +1,135 @@
+# Schema: ../schemas/agent-catalog-v1alpha1.schema.json
+# Replace the zero image digest with the immutable ID of your built base image.
+# This example does not define or replace the normal native Claude/Codex entries.
+apiVersion: asp.now/v1alpha1
+kind: AgentCatalog
+
+defaults:
+  execution:
+    backend: docker
+    user: nonRoot
+    allowPrivilegeEscalation: false
+    readOnlyRoot: true
+    capabilities:
+      drop: [ALL]
+    resources:
+      cpu: 2
+      memory: 4g
+      pids: 512
+  workspace:
+    source: callerWorkspace
+    access: readOnly
+  tools:
+    cli:
+      mode: unrestrictedWithinContainer
+    mcp: []
+
+agents:
+  - id: manager-claude
+    name: Managers Claude
+    role: manager
+    image:
+      ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+      expectedCapabilities:
+        sudo: unavailable
+    harness:
+      name: claude
+      version: 2.1.329
+      authRef: manager-claude
+    tools:
+      launchAgent:
+        interfaces: [cli]
+        allowedWorkers: [claude, codex, gitlab]
+        maxConcurrent: 4
+        maxDepth: 1
+    networkPolicyRef: managers
+
+  - id: manager-codex
+    name: Managers Codex
+    role: manager
+    image:
+      ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+      expectedCapabilities:
+        sudo: unavailable
+    harness:
+      name: codex
+      version: 0.171.0
+      authRef: manager-codex
+    tools:
+      launchAgent:
+        interfaces: [cli]
+        allowedWorkers: [claude, codex, gitlab]
+        maxConcurrent: 4
+        maxDepth: 1
+    networkPolicyRef: managers
+
+  - id: claude
+    name: Claude Worker
+    role: worker
+    image:
+      ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    harness:
+      name: claude
+      version: 2.1.329
+      authRef: worker-claude
+    workspace:
+      access: readWrite
+    execution:
+      readOnlyRoot: false
+    networkPolicyRef: public-workers
+
+  - id: codex
+    name: Codex Worker
+    role: worker
+    image:
+      ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    harness:
+      name: codex
+      version: 0.171.0
+      authRef: worker-codex
+    workspace:
+      access: readWrite
+    execution:
+      readOnlyRoot: false
+    networkPolicyRef: public-workers
+
+  - id: gitlab
+    name: GitLab Worker
+    role: worker
+    image:
+      ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    harness:
+      name: claude
+      version: 2.1.329
+      authRef: worker-gitlab
+    workspace:
+      access: readWrite
+    execution:
+      readOnlyRoot: false
+    staticEnv:
+      GITLAB_HOST: gitlab.example.org
+    hosts:
+      gitlab.example.org: 10.20.0.10
+    vaultPathToEnv:
+      - vaultPath: kv/agents/gitlab
+        field: token
+        env: GITLAB_TOKEN
+    networkPolicyRef: gitlab-workers
+
+networkPolicies:
+  managers:
+    mode: publicExceptPrivate
+    brokerAccess: true
+    dns: [1.1.1.1, 8.8.8.8]
+  public-workers:
+    mode: publicExceptPrivate
+    brokerAccess: false
+    dns: [1.1.1.1, 8.8.8.8]
+  gitlab-workers:
+    mode: publicExceptPrivate
+    brokerAccess: false
+    dns: [1.1.1.1, 8.8.8.8]
+    allow:
+      - cidr: 10.20.0.10/32
+        protocol: tcp
+        ports: [443]

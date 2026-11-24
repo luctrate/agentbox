@@ -14,6 +14,17 @@ Codex containers using `agentbox spawn`, so workers remain visible in Paseo.
 - `agentbox spawn --detach codex "TASK"` starts a Codex worker.
 - `agentbox status ID`, `agentbox wait ID --timeout 60`, and
   `agentbox logs ID --json` report progress and results.
+- `agentbox send ID "MESSAGE"` continues the same worker conversation; it
+  steers rather than interrupts an active turn. Read logs and wait for results.
+- Restricted managers can inspect structured clarification questions with
+  `agentbox questions ID`, then reply using
+  `agentbox answer ID REQUEST_ID --answers '{"EXACT_KEY":"ANSWER"}'`.
+  Use the exact request ID and every key returned by `questions`.
+  This answers Claude/Codex clarification questions only, not tool approvals.
+  If the task does not establish an answer, ask the user instead of guessing.
+- Poll workers for questions while coordinating them; no automatic notification
+  or manager wake-up is currently provided. On `delivery_unconfirmed`, inspect
+  logs/questions; reuse the same delivery `--request-id` to avoid duplicates.
 - Surface pending permission requests for review. Do not silently approve
   broader access or destructive actions.
 - `agentbox stop ID` interrupts a turn; `agentbox archive ID` releases its

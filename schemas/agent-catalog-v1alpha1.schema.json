@@ -1,0 +1,671 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asp.now/schemas/agent-catalog-v1alpha1.schema.json",
+  "title": "ASP Agent Catalog v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "asp.now/v1alpha1"
+    },
+    "kind": {
+      "const": "AgentCatalog"
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "enum": [
+                "docker"
+              ]
+            },
+            "user": {
+              "enum": [
+                "nonRoot"
+              ]
+            },
+            "allowPrivilegeEscalation": {
+              "type": "boolean"
+            },
+            "readOnlyRoot": {
+              "type": "boolean"
+            },
+            "capabilities": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "drop": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "ALL"
+                    ]
+                  },
+                  "maxItems": 1,
+                  "uniqueItems": true
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 64
+                },
+                "memory": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20,
+                  "pattern": "^[1-9][0-9]*[kKmMgG]?$"
+                },
+                "pids": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 32768
+                }
+              }
+            }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "callerWorkspace",
+                "ephemeral",
+                "none"
+              ]
+            },
+            "access": {
+              "enum": [
+                "readOnly",
+                "readWrite",
+                "none"
+              ]
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cli": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "unrestrictedWithinContainer",
+                    "mediated",
+                    "disabled"
+                  ]
+                },
+                "policyRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 63,
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                }
+              }
+            },
+            "launchAgent": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "interfaces": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "cli",
+                      "mcp"
+                    ]
+                  },
+                  "maxItems": 2,
+                  "uniqueItems": true
+                },
+                "allowedWorkers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "maxConcurrent": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                }
+              }
+            },
+            "mcp": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "serverRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "allowedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "maxItems": 256,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "serverRef"
+                ]
+              },
+              "maxItems": 256,
+              "uniqueItems": true
+            }
+          }
+        },
+        "networkPolicyRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "staticEnv": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "harness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authStorage": {
+              "enum": [
+                "persistent",
+                "ephemeral"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/agent"
+      }
+    },
+    "networkPolicies": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 256,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 63,
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/networkPolicy"
+      }
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "agents",
+    "networkPolicies"
+  ],
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "manager",
+            "worker",
+            "approver"
+          ]
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "expectedCapabilities": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sudo": {
+                  "enum": [
+                    "available",
+                    "unavailable",
+                    "unknown"
+                  ]
+                }
+              }
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        },
+        "harness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
+            },
+            "authRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 63,
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "authStorage": {
+              "enum": [
+                "persistent",
+                "ephemeral"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "authRef"
+          ]
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "enum": [
+                "docker"
+              ]
+            },
+            "user": {
+              "enum": [
+                "nonRoot"
+              ]
+            },
+            "allowPrivilegeEscalation": {
+              "type": "boolean"
+            },
+            "readOnlyRoot": {
+              "type": "boolean"
+            },
+            "capabilities": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "drop": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "ALL"
+                    ]
+                  },
+                  "maxItems": 1,
+                  "uniqueItems": true
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 64
+                },
+                "memory": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20,
+                  "pattern": "^[1-9][0-9]*[kKmMgG]?$"
+                },
+                "pids": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 32768
+                }
+              }
+            }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "callerWorkspace",
+                "ephemeral",
+                "none"
+              ]
+            },
+            "access": {
+              "enum": [
+                "readOnly",
+                "readWrite",
+                "none"
+              ]
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cli": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "unrestrictedWithinContainer",
+                    "mediated",
+                    "disabled"
+                  ]
+                },
+                "policyRef": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 63,
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                }
+              }
+            },
+            "launchAgent": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "interfaces": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "cli",
+                      "mcp"
+                    ]
+                  },
+                  "maxItems": 2,
+                  "uniqueItems": true
+                },
+                "allowedWorkers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "maxItems": 256,
+                  "uniqueItems": true
+                },
+                "maxConcurrent": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                }
+              }
+            },
+            "mcp": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "serverRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "allowedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "maxItems": 256,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "serverRef"
+                ]
+              },
+              "maxItems": 256,
+              "uniqueItems": true
+            }
+          }
+        },
+        "networkPolicyRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "staticEnv": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "vaultPathToEnv": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "vaultPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "env": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "vaultPath",
+              "field",
+              "env"
+            ]
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "image",
+        "harness"
+      ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "publicExceptPrivate",
+            "denyAll"
+          ]
+        },
+        "dns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 45
+          },
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "brokerAccess": {
+          "type": "boolean"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "protocol": {
+                "enum": [
+                  "tcp",
+                  "udp"
+                ]
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "maxItems": 128,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "cidr",
+              "protocol",
+              "ports"
+            ]
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "httpsProxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowedHosts"
+          ],
+          "properties": {
+            "allowedHosts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    }
+  }
+}

@@ -81,6 +81,14 @@ def main():
         if not config_path.is_file():
             parser.error('--apply requires an existing native Paseo config: '+str(config_path))
         config = json.loads(config_path.read_text())
+        # This legacy helper enables broad profiles and native MCP injection.
+        # Never use it to overwrite a restricted/catalog-managed deployment.
+        for provider in config.get('agents', {}).get('providers', {}).values():
+            command = provider.get('command', [])
+            if '--role' in command and (
+                '--policy' in command or any('/security/provider' in str(part) for part in command)
+            ):
+                parser.error('Restricted/catalog providers detected; use agentbox catalog plan/apply instead')
         current = config.setdefault('agents',{}).setdefault('providers',{})
         for name, value in providers.items():
             if name in current and current[name].get('command')!=value['command']:

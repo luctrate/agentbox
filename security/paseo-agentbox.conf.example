@@ -1,0 +1,4 @@
+# Install under /etc/systemd/system/paseo.service.d/ after reviewing your unit.
+[Unit]
+Requires=agentbox-broker.service
+After=agentbox-broker.service

@@ -1,0 +1,155 @@
+# Replace zero image IDs: managers use base; offline uses ephemeral; research uses research-browser.
+apiVersion: asp.now/v1alpha1
+kind: AgentCatalog
+agents:
+- id: manager-claude
+  name: Managers Claude
+  role: manager
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: manager-claude
+    authStorage: persistent
+  networkPolicyRef: manager
+  workspace:
+    source: callerWorkspace
+    access: readOnly
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - offline-claude
+      - offline-codex
+      maxDepth: 2
+      maxConcurrent: 2
+- id: manager-codex
+  name: Managers Codex
+  role: manager
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: manager-codex
+    authStorage: persistent
+  networkPolicyRef: manager
+  workspace:
+    source: callerWorkspace
+    access: readOnly
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - offline-claude
+      - offline-codex
+      maxDepth: 2
+      maxConcurrent: 2
+- id: offline-claude
+  name: offline-claude
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: offline-claude
+    authStorage: ephemeral
+  networkPolicyRef: model-only
+  workspace:
+    source: callerWorkspace
+    access: readWrite
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - research-claude
+      - research-codex
+      maxDepth: 1
+      maxConcurrent: 2
+- id: offline-codex
+  name: offline-codex
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: offline-codex
+    authStorage: ephemeral
+  networkPolicyRef: model-only
+  workspace:
+    source: callerWorkspace
+    access: readWrite
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - research-claude
+      - research-codex
+      maxDepth: 1
+      maxConcurrent: 2
+- id: research-claude
+  name: research-claude
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: research-claude
+    authStorage: ephemeral
+  networkPolicyRef: research
+  workspace:
+    source: none
+    access: none
+  tools:
+    launchAgent:
+      allowedWorkers: []
+      maxDepth: 1
+      maxConcurrent: 2
+- id: research-codex
+  name: research-codex
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: research-codex
+    authStorage: ephemeral
+  networkPolicyRef: research
+  workspace:
+    source: none
+    access: none
+  tools:
+    launchAgent:
+      allowedWorkers: []
+      maxDepth: 1
+      maxConcurrent: 2
+networkPolicies:
+  manager:
+    mode: publicExceptPrivate
+    brokerAccess: true
+  model-only:
+    mode: denyAll
+    dns: []
+    brokerAccess: true
+    httpsProxy:
+      allowedHosts:
+      - api.anthropic.com
+      - platform.claude.com
+      - api.openai.com
+      - auth.openai.com
+      - chatgpt.com
+  research:
+    mode: publicExceptPrivate

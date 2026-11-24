@@ -1,0 +1,26 @@
+# Adapt the trusted prefix and bridge address to your platform bindings.
+[Unit]
+Description=Agentbox model-only HTTPS egress
+Requires=agentbox-network.service
+After=agentbox-network.service
+Before=agentbox-broker.service paseo.service
+
+[Service]
+User=agentbox-egress
+Group=agentbox-egress
+WorkingDirectory=/var/lib/agentbox-egress
+Environment=AGENTBOX_MODEL_PROXY=1
+Environment=AGENTBOX_POLICY=/etc/agentbox/security.json
+ExecStart=/opt/agentbox-egress-venv/bin/mitmdump --listen-host 172.29.42.1 --listen-port 3128 --mode regular --set confdir=/var/lib/agentbox-egress --set connection_strategy=lazy --set rawtcp=false --set http3=false --set onboarding=false --set flow_detail=0 --set termlog_verbosity=error --set ssl_insecure=false --set store_streamed_bodies=false --scripts /opt/agentbox/security/model_proxy.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agentbox-egress
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

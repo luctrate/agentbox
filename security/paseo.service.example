@@ -1,0 +1,21 @@
+# For an existing native Paseo installation. Adapt the binary/user/HOME first.
+# Put passwords in Paseo's protected configuration, never in this public unit.
+[Unit]
+Description=Paseo native agent daemon
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paseo
+Group=paseo
+Environment=HOME=/home/paseo
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/paseo
+ExecStart=/usr/bin/paseo daemon run --home /home/paseo/.paseo
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
