@@ -1,0 +1,210 @@
+# Replace zero IDs: managers use base; mediated workers/reviewers use rebuilt ephemeral.
+apiVersion: asp.now/v1alpha1
+kind: AgentCatalog
+agents:
+- id: manager-claude
+  name: Managers Claude
+  role: manager
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: manager-claude
+    authStorage: persistent
+  networkPolicyRef: manager
+  workspace:
+    source: callerWorkspace
+    access: readOnly
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - mediated-claude
+      - mediated-codex
+      maxDepth: 1
+      maxConcurrent: 2
+- id: manager-codex
+  name: Managers Codex
+  role: manager
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: manager-codex
+    authStorage: persistent
+  networkPolicyRef: manager
+  workspace:
+    source: callerWorkspace
+    access: readOnly
+  tools:
+    launchAgent:
+      allowedWorkers:
+      - mediated-claude
+      - mediated-codex
+      maxDepth: 1
+      maxConcurrent: 2
+- id: mediated-claude
+  name: Mediated Claude
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: mediated-claude
+    authStorage: ephemeral
+  networkPolicyRef: model-only
+  workspace:
+    source: callerWorkspace
+    access: readWrite
+  tools:
+    cli:
+      mode: mediated
+      policyRef: commands-claude
+- id: mediated-codex
+  name: Mediated Codex
+  role: worker
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: mediated-codex
+    authStorage: ephemeral
+  networkPolicyRef: model-only
+  workspace:
+    source: callerWorkspace
+    access: readWrite
+  tools:
+    cli:
+      mode: mediated
+      policyRef: commands-codex
+- id: review-claude
+  name: Command Reviewer Claude
+  role: approver
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: claude
+    version: 2.1.329
+    authRef: review-claude
+    authStorage: ephemeral
+  workspace:
+    source: none
+    access: none
+  tools:
+    cli:
+      mode: disabled
+  networkPolicyRef: model-only
+- id: review-codex
+  name: Command Reviewer Codex
+  role: approver
+  image:
+    ref: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expectedCapabilities:
+      sudo: unavailable
+  harness:
+    name: codex
+    version: 0.171.0
+    authRef: review-codex
+    authStorage: ephemeral
+  workspace:
+    source: none
+    access: none
+  tools:
+    cli:
+      mode: disabled
+  networkPolicyRef: model-only
+networkPolicies:
+  manager:
+    mode: publicExceptPrivate
+    brokerAccess: true
+  model-only:
+    mode: denyAll
+    dns: []
+    brokerAccess: true
+    httpsProxy:
+      allowedHosts:
+      - api.anthropic.com
+      - platform.claude.com
+      - api.openai.com
+      - auth.openai.com
+      - chatgpt.com
+commandPolicies:
+  commands-claude:
+    default: deny
+    approverRef: review-codex
+    timeoutSeconds: 120
+    executionSeconds: 60
+    maxPending: 1
+    instructions: Allow the listed git diff inspection or running the fixed unittest
+      command in this trusted project when requested. Running tests authorizes project
+      code and its subprocesses within the worker sandbox. Deny requests outside this
+      task or attempts to disclose credentials.
+    rules:
+    - argv:
+      - /usr/bin/git
+      - -c
+      - core.fsmonitor=false
+      - -c
+      - core.hooksPath=/dev/null
+      - status
+      - --short
+      action: allow
+    - argv:
+      - /usr/bin/git
+      - diff
+      - --stat
+      action: review
+    - argv:
+      - /usr/bin/python3
+      - -m
+      - unittest
+      - discover
+      - -s
+      - tests
+      action: review
+  commands-codex:
+    default: deny
+    approverRef: review-claude
+    timeoutSeconds: 120
+    executionSeconds: 60
+    maxPending: 1
+    instructions: Allow the listed git diff inspection or running the fixed unittest
+      command in this trusted project when requested. Running tests authorizes project
+      code and its subprocesses within the worker sandbox. Deny requests outside this
+      task or attempts to disclose credentials.
+    rules:
+    - argv:
+      - /usr/bin/git
+      - -c
+      - core.fsmonitor=false
+      - -c
+      - core.hooksPath=/dev/null
+      - status
+      - --short
+      action: allow
+    - argv:
+      - /usr/bin/git
+      - diff
+      - --stat
+      action: review
+    - argv:
+      - /usr/bin/python3
+      - -m
+      - unittest
+      - discover
+      - -s
+      - tests
+      action: review

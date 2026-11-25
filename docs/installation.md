@@ -92,6 +92,11 @@ UID/GID, service HOME, native Paseo binary, roots, auth references and service
 paths. Never put credential values in either file. The source examples use zero
 image IDs deliberately; replace every zero ID before activation.
 
+For mediated commands and separate AI reviewers, select
+`examples/command-catalog.yaml` and `examples/command-platform.json`; see
+[command policies](command-policies.md). Create auth directories for its
+`mediated-*` and `review-*` roles instead of the research example roles.
+
 Alternatively use `examples/catalog.yaml` and `examples/platform.json` for the
 basic manager/worker/Vault example. Remove or adapt optional tool-secret mappings
 before using it. Unlike the research example, its ordinary workers have general

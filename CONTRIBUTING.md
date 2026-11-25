@@ -23,6 +23,10 @@ restart/history recovery, worktree placement and interrupt/archive cleanup
 using a separate authenticated test daemon and disposable repo. Do not claim
 these live checks passed merely because fixture tests pass.
 
+For controlled CLI changes, run the credential-free pinned-harness tool-inventory
+and gateway-roundtrip check in [command-policies.md](docs/command-policies.md).
+A fixture policy test alone does not prove the model lost native execution tools.
+
 Version updates should change the exact agent version defaults and their
 documentation together, rebuild all used descendants and repeat protocol
 checks against the installed Paseo SDK. Keep credentials, generated daemon

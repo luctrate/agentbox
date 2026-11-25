@@ -26,10 +26,11 @@ jobs:
         run: |
           node --check images/research-browser/research-browser.cjs
           node --check tests/research_browser_smoke.cjs
-      - name: Validate both example catalogs
+      - name: Validate example catalogs
         run: |
           python3 deploy/catalog.py validate examples/catalog.yaml --platform examples/platform.json
           python3 deploy/catalog.py validate examples/research-catalog.yaml --platform examples/research-platform.json
+          python3 deploy/catalog.py validate examples/command-catalog.yaml --platform examples/command-platform.json
       - name: Run fixture-based tests (no credentials or Docker daemon needed)
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
   secrets:
@@ -50,3 +51,29 @@ jobs:
             "$RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check -
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --redact=100 --no-banner --log-opts='--all'
+  command-harnesses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fixture dependencies
+        run: python3 -m pip install -r requirements.txt
+      - name: Build pinned harness and command-gateway images
+        run: |
+          ./bin/agentbox build base
+          docker build -f images/ephemeral/Dockerfile --build-arg BASE=agentbox/base:latest -t agentbox/ephemeral:local .
+      - name: Verify the real container command boundary
+        run: python3 tests/docker_command_smoke.py --image agentbox/ephemeral:local
+      - name: Verify pinned harness inventories and command/review roundtrips without credentials
+        run: |
+          docker run --rm --init --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --memory 2g --pids-limit 256 \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=256m \
+            --tmpfs /home/agent:rw,nosuid,nodev,mode=0700,size=256m,uid=1000,gid=1000 \
+            --mount type=bind,source="$PWD",target=/opt/fixture,readonly \
+            --entrypoint python3 agentbox/ephemeral:local /opt/fixture/tests/harness_command_smoke.py

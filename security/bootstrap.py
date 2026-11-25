@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 ALLOWED={'.claude/.credentials.json','.claude.json','.claude/CLAUDE.md',
-         '.codex/auth.json','.codex/AGENTS.md','.config/agentbox/ca.pem'}
+         '.codex/auth.json','.codex/AGENTS.md','.config/agentbox/ca.pem','.config/agentbox/broker.json'}
 
 
 def main():

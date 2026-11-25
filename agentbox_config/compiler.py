@@ -154,7 +154,8 @@ def compile_catalog(catalog, platform):
                     'deny_public_ips', 'vault_addr', 'vault_cacert') if key in platform}}
     revision = _digest(identity)
     runtime = {key: copy.deepcopy(value) for key, value in platform.items() if key not in COMPILER_KEYS}
-    runtime.update({'catalog_revision': revision, 'roles': {}, 'networks': networks})
+    runtime.update({'catalog_revision': revision, 'roles': {}, 'networks': networks,
+                    'command_policies': copy.deepcopy(normalized['commandPolicies'])})
     # Internal Docker bridges have no default route; expose the broker only on
     # explicitly managed bridge gateways, never on wildcard/public interfaces.
     runtime['listen_addresses']=sorted(set([runtime.get('listen','127.0.0.1')]+[
@@ -171,6 +172,7 @@ def compile_catalog(catalog, platform):
         launch = agent['tools']['launchAgent'];harness = agent['harness'];ref = agent['networkPolicyRef']
         role = {'definition_id': ident, 'provider_id': provider_id, 'revision': revision,
                 'enabled': agent['enabled'], 'agent': harness['name'], 'manager': agent['role'] == 'manager',
+                'role': agent['role'], 'cli': copy.deepcopy(agent['tools']['cli']),
                 'sudo': execution['allowPrivilegeEscalation'], 'auth': used_auth[harness['authRef']],
                 'image': agent['image']['ref'], 'harness_version': harness['version'],
                 'expected_capabilities': copy.deepcopy(agent['image']['expectedCapabilities']),

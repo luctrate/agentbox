@@ -22,6 +22,10 @@ read-only root, 2 CPUs / 4 GiB RAM / 512 PIDs in the reference deployment, and n
 Vault/GitLab tool credentials. Model login and the offline worker's scoped
 broker capability remain necessary credentials.
 
+The separate [command-policy profiles](command-policies.md) also use ephemeral
+auth, but project-mounted mediated workers can explicitly receive Vault tool
+credentials. That exception does not add secrets to these research profiles.
+
 ## No host authentication mounts
 
 Set `harness.authStorage: ephemeral`. The trusted launcher reads only the

@@ -3,6 +3,7 @@
 import argparse
 from contextlib import contextmanager
 import hashlib
+import importlib.util
 import http.server
 import json
 import os
@@ -15,6 +16,9 @@ import subprocess
 import threading
 import time
 import uuid
+
+_spec=importlib.util.spec_from_file_location('agentbox_commands',Path(__file__).with_name('commands.py'))
+commands=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(commands)
 
 PROFILES={'claude':'claude-box','codex':'codex-box','node':'agentbox-node',
           'node-codex':'agentbox-node-codex','gitlab':'agentbox-gitlab',
@@ -102,6 +106,17 @@ class Backend:
             result.append(identifier(child))
         return result
 
+    def find_review(self,request_id,owner):
+        rows=self.call(['ls','--all','--label','asp.now.command-review='+request_id,'--json'],owner)
+        if not isinstance(rows,list):raise BackendFailure('Invalid review list response')
+        result=[]
+        for row in rows:
+            if not isinstance(row,dict):raise BackendFailure('Invalid review record')
+            labels=row.get('labels',row.get('Labels'))
+            if labels is not None and (not isinstance(labels,dict) or labels.get('asp.now.command-review')!=request_id):continue
+            result.append(identifier(row.get('id',row.get('Id',row.get('agentId')))))
+        return result
+
     def messaging(self,operation,data,owner,launch):
         payload=dict(data,operation=operation,owner=owner['id'],provider=launch['provider'],
                      cwd=launch['cwd'])
@@ -158,6 +173,7 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
         self.db_path.chmod(0o600)
         self._validate_policy()
         self._migrate_legacy()
+        self.commands=commands.CommandService(self)
         with self.transaction() as db:
             # A previous broker may have exited between reservation and launch confirmation.
             db.execute("UPDATE launches SET state='uncertain' WHERE state='reserved'")
@@ -240,7 +256,8 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
             return {'owners':owners}
 
     def register(self,request):
-        allowed={'op','id','cwd','workspace','definition_id','catalog_revision','launch_id'}
+        allowed={'op','id','cwd','workspace','definition_id','catalog_revision','launch_id',
+                 'container','review_request_id','review_nonce'}
         if not isinstance(request,dict) or set(request)-allowed:raise Denied('Invalid registration')
         owner_id=identifier(request['id'])
         cwd=Path(request['cwd']).resolve(strict=True)
@@ -256,7 +273,8 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
             role=self.roles.get(definition) if isinstance(definition,str) else None
             if not role or not role.get('enabled',True):raise Denied('Unknown definition')
             delegation=role.get('delegation',{})
-            if not delegation.get('allowed_workers'):raise Denied('Definition cannot delegate')
+            if (not delegation.get('allowed_workers') and role.get('cli',{}).get('mode')!='mediated' and role.get('role')!='approver'):
+                raise Denied('Definition has no broker authority')
             claims={k:delegation[k] for k in ('allowed_workers','max_concurrent','max_depth')}
             if request.get('launch_id'):
                 launch_id=identifier(request['launch_id'])
@@ -269,10 +287,11 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
                     if (launch['profile']!=definition or launch['owner_id']!=parent['id'] or
                             launch['revision']!=self.revision or str(cwd)!=context['cwd'] or
                             workspace!=context['workspace'] or launch['state'] not in ('reserved','uncertain','created') or
-                            parent['max_depth']<2):raise Denied('Invalid nested launch scope')
+                            parent['max_depth']<1):raise Denied('Invalid nested launch scope')
                 claims['max_depth']=min(claims['max_depth'],parent['max_depth']-1)
                 claims['parent_capability']=digest
                 claims['launch_id']=launch_id
+            self.commands.registration(request,role,claims)
         token=secrets.token_urlsafe(40);digest=hashlib.sha256(token.encode()).hexdigest()
         with self.transaction() as db:
             child=db.execute('SELECT * FROM children WHERE id=?',(owner_id,)).fetchone()
@@ -297,6 +316,9 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
                        (owner_id,str(cwd),workspace,definition,self.revision,generation,json.dumps(claims)))
             db.execute('DELETE FROM capabilities WHERE owner_id=?',(owner_id,))
             db.execute('INSERT INTO capabilities VALUES(?,?,?,?)',(digest,owner_id,generation,time.time()+24*3600))
+        try:self.commands.bind(request,digest,claims)
+        except Exception:
+            self.revoke(token);raise
         return {'token':token}
 
     def revoke(self,token):
@@ -436,7 +458,10 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
         args=(owner_id,) if owner_id else ()
         children=db.execute('SELECT count(*) FROM children'+clause,args).fetchone()[0]
         clause=" WHERE state IN ('reserved','uncertain')"+(' AND owner_id=?' if owner_id else '')
-        return children+db.execute('SELECT count(*) FROM launches'+clause,args).fetchone()[0]
+        reviews=0
+        if owner_id is None:
+            reviews=db.execute('SELECT count(*) FROM command_requests WHERE review_nonce IS NOT NULL AND reviewer_archived=0').fetchone()[0]
+        return children+db.execute('SELECT count(*) FROM launches'+clause,args).fetchone()[0]+reviews
 
     def _spawn(self,owner,data):
         profile,task=data['profile'],data['task']
@@ -464,7 +489,8 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
         args=['run','--provider',provider,'--title','[box:'+profile+'] '+task[:60],
               '--label','asp.now.launch='+launch_id,'--no-wait','--json']
         if self.catalog:args+=['--env','AGENTBOX_PARENT_AGENT_ID='+owner['id']]
-        if self.catalog and self.roles[profile].get('delegation',{}).get('allowed_workers'):
+        if self.catalog and (self.roles[profile].get('delegation',{}).get('allowed_workers') or
+                             self.roles[profile].get('cli',{}).get('mode')=='mediated'):
             args+=['--env','AGENTBOX_PARENT_LAUNCH='+launch_id]
         if owner.get('workspace'):args+=['--workspace',owner['workspace']]
         else:args+=['--cwd',owner['cwd']]
@@ -583,6 +609,11 @@ CREATE TABLE IF NOT EXISTS deliveries(owner_id TEXT NOT NULL REFERENCES owners(i
 
     def handle(self,token,operation,data):
         owner=self.authenticate(token)
+        if operation in commands.OPERATIONS:
+            try:return self.commands.handle(owner,operation,data)
+            except ValueError:raise Denied('Command operation denied') from None
+        if self.roles.get(owner['definition_id'],{}).get('role')=='approver':
+            raise Denied('Reviewers have only their assigned review authority')
         if operation not in FIELDS or not isinstance(data,dict):raise Denied('Unsupported operation or fields')
         valid=set(data)==FIELDS[operation] or operation in ('spawn','send','answer') and set(data)==FIELDS[operation]|{'requestId'}
         if not valid:raise Denied('Unsupported operation or fields')

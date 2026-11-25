@@ -33,6 +33,30 @@ The [catalog guide](docs/catalog.md) describes validation, activation, managed
 provider conflicts and rollback. Only install reviewed source under a protected
 prefix. Never run an agent-writable operator/launcher as a privileged service.
 
+## Mediated commands and reviewer agents
+
+Controlled CLI profiles disable native shell/code tools and expose a fixed
+internal MCP adapter. It is an untrusted transport: exact argv policy, runtime
+binding and one-shot review authorization live in the host broker. Reviewers
+receive only their assigned request/decision tools, no workspace binds or Vault
+secrets, and no delegation. Native session identity is verified before a fast
+review decision can authorize execution. Rule denial cannot be overridden.
+
+Approvals are tied to the complete command, requesting runtime capability,
+working directory, catalog revision and expiry. Replays do not repeat execution.
+The executor validates Docker labels/user/revision and pins the real container
+ID. Capability revocation is serialized with process start after inspection.
+Uncertain launches/executions fail closed and retain their durable record.
+
+This controls harness tool invocations, not every descendant Linux exec call.
+An approved executable/script can run subprocesses and consume mutable project
+configuration within its existing sandbox. A model reviewer can make a wrong
+decision or be influenced by hostile arguments. Native file permissions remain
+separate. Broker audit/output/transcripts are private and can contain sensitive
+arguments or output; no automatic redaction is promised. Killing a Docker client
+after timeout does not prove its in-container command stopped. See
+[command policies](docs/command-policies.md) for recovery and verification.
+
 ## Files and credentials
 
 Persistent auth profiles mount their selected model-auth directory read/write so

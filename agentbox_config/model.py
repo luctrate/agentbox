@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 
 from .loader import CatalogError, _check_data
 from security.secret_values import validate_environment_key
+from security.commands import validate_policy as validate_command_policy
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'schemas/agent-catalog-v1alpha1.schema.json'
 IMMUTABLE_IMAGE = re.compile(r'^(?:sha256:[a-f0-9]{64}|[^\s@]+@sha256:[a-f0-9]{64})$')
@@ -71,7 +72,11 @@ def validate_catalog(catalog):
     """Return a new complete normalized catalog, rejecting unenforced settings."""
     _validate_schema(catalog)
     result = {'apiVersion': catalog['apiVersion'], 'kind': catalog['kind'], 'agents': [],
-              'networkPolicies': copy.deepcopy(catalog['networkPolicies'])}
+              'networkPolicies': copy.deepcopy(catalog['networkPolicies']),
+              'commandPolicies': copy.deepcopy(catalog.get('commandPolicies', {}))}
+    for key, value in result['commandPolicies'].items():
+        try: result['commandPolicies'][key] = validate_command_policy(value)
+        except ValueError: raise CatalogError('Invalid command policy: ' + key) from None
     defaults = _merge(BASE_DEFAULTS, catalog.get('defaults', {}))
     ids = set()
     for raw in catalog['agents']:
@@ -80,8 +85,8 @@ def validate_catalog(catalog):
         if ident in ids:
             raise CatalogError('Agent IDs must be unique')
         ids.add(ident)
-        if agent['role'] not in ('manager', 'worker'):
-            raise CatalogError('Approver agents are not supported until approval routing is installed')
+        if agent['role'] not in ('manager', 'worker', 'approver'):
+            raise CatalogError('Unknown agent role')
         if not IMMUTABLE_IMAGE.fullmatch(agent['image']['ref']):
             raise CatalogError('agents.' + ident + '.image.ref: immutable sha256 image reference required')
         agent['image'].setdefault('expectedCapabilities', {}).setdefault('sudo', 'unknown')
@@ -92,11 +97,29 @@ def validate_catalog(catalog):
             raise CatalogError('Use callerWorkspace readOnly/readWrite or none/none')
         if source=='none' and agent['harness']['authStorage']!='ephemeral':
             raise CatalogError('Unshared agents require ephemeral model authentication')
-        if agent['harness']['authStorage']=='ephemeral' and agent['vaultPathToEnv']:
+        if (agent['harness']['authStorage']=='ephemeral' and agent['vaultPathToEnv'] and
+                not (agent['tools']['cli']['mode']=='mediated' and source=='callerWorkspace')):
             raise CatalogError('Ephemeral-auth profiles do not accept tool secrets')
         tools = agent['tools']
-        if tools['cli']['mode'] != 'unrestrictedWithinContainer' or 'policyRef' in tools['cli']:
-            raise CatalogError('Mediated/disabled CLI and command policies are not implemented')
+        cli = tools['cli']
+        if cli['mode'] == 'mediated':
+            if cli.get('policyRef') not in result['commandPolicies']:
+                raise CatalogError('Mediated CLI requires an existing command policy')
+        elif 'policyRef' in cli:
+            raise CatalogError('Only mediated CLI may reference a command policy')
+        if cli['mode'] != 'unrestrictedWithinContainer':
+            execution = agent['execution']
+            if (agent['harness']['authStorage'] != 'ephemeral' or not execution['readOnlyRoot'] or
+                    execution['allowPrivilegeEscalation'] or execution['capabilities']['drop'] != ['ALL']):
+                raise CatalogError('Controlled CLI requires ephemeral auth, read-only root and no privilege escalation')
+            if agent['harness']['version'] != {'claude':'2.1.329','codex':'0.171.0'}[agent['harness']['name']]:
+                raise CatalogError('Controlled CLI requires a verified pinned harness version')
+        if agent['role'] == 'approver':
+            if (cli['mode'] != 'disabled' or source != 'none' or agent['vaultPathToEnv'] or
+                    tools['launchAgent']['allowedWorkers']):
+                raise CatalogError('Approvers require disabled CLI, no host workspace, no secrets and no delegation')
+        if cli['mode'] == 'disabled' and tools['launchAgent']['allowedWorkers']:
+            raise CatalogError('CLI-disabled profiles cannot use CLI delegation')
         if tools['mcp']:
             raise CatalogError('MCP tool authorization is not implemented by this runtime')
         launch = tools['launchAgent']
@@ -135,10 +158,20 @@ def validate_catalog(catalog):
         reference = agent.get('networkPolicyRef')
         if reference not in result['networkPolicies']:
             raise CatalogError('Agent references a missing network policy')
-        if launch['allowedWorkers'] and not result['networkPolicies'][reference].get('brokerAccess', False):
+        if (launch['allowedWorkers'] or cli['mode']=='mediated' or agent['role']=='approver') and not result['networkPolicies'][reference].get('brokerAccess', False):
             raise CatalogError('Delegating agents need brokerAccess in their network policy')
         result['agents'].append(agent)
     index = {agent['id']: agent for agent in result['agents']}
+    for policy in result['commandPolicies'].values():
+        if policy.get('approverRef'):
+            reviewer = index.get(policy['approverRef'])
+            if not reviewer or not reviewer['enabled'] or reviewer['role'] != 'approver':
+                raise CatalogError('Command policy requires an enabled approver definition')
+    for agent in result['agents']:
+        if agent['role']=='approver':
+            network=result['networkPolicies'][agent['networkPolicyRef']]
+            if network['mode']!='denyAll' or not network.get('httpsProxy') or network.get('allow') or network.get('dns'):
+                raise CatalogError('Approvers require the internal model-only HTTPS-proxy network')
     for agent in result['agents']:
         allowed = agent['tools']['launchAgent']['allowedWorkers']
         for target in allowed:

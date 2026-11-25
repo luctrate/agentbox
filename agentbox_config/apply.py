@@ -109,7 +109,7 @@ def inspect_images(policy,commands):
     """Probe trusted, digest-pinned images without host mounts, credentials or network."""
     observations={}
     script="""import json,shutil,subprocess
-out={'sudo':bool(shutil.which('sudo')),'bootstrap':bool(shutil.which('agentbox-bootstrap')),'broker_client':bool(shutil.which('agentbox')),'versions':{}}
+out={'sudo':bool(shutil.which('sudo')),'bootstrap':bool(shutil.which('agentbox-bootstrap')),'broker_client':bool(shutil.which('agentbox')),'command_gateway':bool(shutil.which('agentbox-mcp')),'versions':{}}
 for name in ['claude','codex']:
  try:out['versions'][name]=subprocess.check_output([name,'--version'],text=True,stderr=subprocess.DEVNULL).strip()
  except Exception:out['versions'][name]=None
@@ -140,6 +140,8 @@ print(json.dumps(out))
         if role.get('sudo') and not observed['sudo']:raise ApplyError('Sudo role requires a sudo image: '+name)
         if role.get('auth_storage')=='ephemeral' and not observed.get('bootstrap'):
             raise ApplyError('Ephemeral model auth requires the bootstrap image: '+name)
+        if role.get('cli',{}).get('mode') in ('mediated','disabled') and not observed.get('command_gateway'):
+            raise ApplyError('Controlled CLI requires an image-baked command adapter: '+name)
         if role.get('auth_storage')=='ephemeral' and role.get('delegation',{}).get('allowed_workers') and not observed.get('broker_client'):
             raise ApplyError('Unshared delegation requires an image-baked broker client: '+name)
         if not Path(role['auth']).is_dir():raise ApplyError('Role auth directory is missing: '+name)

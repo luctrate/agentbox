@@ -33,13 +33,20 @@ follow the [installation guide](installation.md).
   CIDR/protocol/port exceptions, selected DNS and broker access. Rules are
   enforced through Docker bridges and host firewall policy.
 
-`tools.cli.mode: unrestrictedWithinContainer` is the supported command mode.
-Mediated commands, CLI-disabled/MCP-only agents, remote MCP tool policies,
-reviewer-agent approvals, arbitrary domain egress policies and workspace creation
-are rejected until the corresponding adapters exist. The supported domain
-restriction is the dedicated internal-network HTTPS proxy described above.
-An empty `tools.mcp: []` declares no configured MCP integrations; it does not
-claim an unrestricted shell could never run an MCP client itself.
+`tools.cli.mode` supports `unrestrictedWithinContainer`, `mediated` and
+`disabled`. Mediated profiles reference a `commandPolicies` entry with exact
+argv allow/deny/review rules. Review rules can route to a separate `role: approver`
+agent; the host broker records a one-shot decision and executes only the fixed
+command in the original container. Controlled profiles require verified pinned
+harnesses, ephemeral auth and hardened container settings. See
+[command policies](command-policies.md) for the boundary, examples and requirements.
+
+General catalog-managed MCP servers/tool policies, a configurable MCP launch
+interface, arbitrary network proxy arrangements and workspace creation remain
+unsupported. The command gateway uses one fixed internal MCP adapter; this does
+not enable arbitrary `tools.mcp` entries. An empty `tools.mcp: []` declares no
+additional configured integrations. An unrestricted shell can still run its own
+MCP client within the container's existing access.
 
 ## Files and trust
 
@@ -218,8 +225,8 @@ Multiline values, CRLF and trailing newlines are preserved; NUL is rejected.
 Ending a container does not revoke an already copied static service token.
 
 `publicExceptPrivate` allows general public egress, not just model APIs.
-`denyAll` allows only its explicit IP/port and DNS exceptions. Domain filters
-need a separately enforced proxy/resolver and are not implemented here. The
+`denyAll` allows only its explicit IP/port and DNS exceptions. The dedicated internal-network HTTPS proxy supports exact allowed hosts;
+general-purpose domain/protocol filtering needs additional adapters. The
 runtime disables IPv6 and checks a root-owned network-readiness revision/hash.
 A firewall rule update preserves established connections; apply requires
 managed runtimes to close/drain before adopting changed policy. Unrelated

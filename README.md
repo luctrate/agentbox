@@ -19,6 +19,8 @@ hostile multi-tenant workloads. See [SECURITY.md](SECURITY.md).
   depth, cycle rejection, direct-child ownership and revocable runtime capabilities.
 - **Follow-ups and clarification:** message an existing worker and answer its
   supported question cards without granting command/file approvals.
+- **Mediated commands:** exact argv allow/deny/review rules, with native command tools disabled and host-enforced container execution.
+- **Reviewer agents:** a separate Claude/Codex session can authorize one exact command with a bounded, auditable decision.
 - **Durable lifecycle:** SQLite launch ownership, idempotent request IDs and
   conservative handling of ambiguous launches/deliveries.
 - **Container controls:** non-root execution, CPU/memory/PID limits, read-only
@@ -46,6 +48,7 @@ setup and first activation on an existing native Linux Paseo/Docker host.
 
 - [Basic catalog](examples/catalog.yaml) and [platform bindings](examples/platform.json)
 - [Research/model-only catalog](examples/research-catalog.yaml) and [bindings](examples/research-platform.json)
+- [Command policies and reviewer agents](docs/command-policies.md), [catalog](examples/command-catalog.yaml) and [bindings](examples/command-platform.json)
 - [Catalog schema and operator](docs/catalog.md)
 - [Research workers and browser usage](docs/research-workers.md)
 

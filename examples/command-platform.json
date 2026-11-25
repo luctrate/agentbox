@@ -1,0 +1,70 @@
+{
+  "host_home": "/home/paseo",
+  "uid": 1000,
+  "gid": 1000,
+  "roots": [
+    "/srv/agentbox/workspaces",
+    "/srv/agentbox/worktrees"
+  ],
+  "control_socket": "/run/agentbox-broker/control.sock",
+  "state": "/var/lib/agentbox-broker/state.json",
+  "listen": "172.29.40.1",
+  "port": 6768,
+  "broker_url": "http://172.29.40.1:6768",
+  "client": "/opt/agentbox/security/client.py",
+  "max_workers": 8,
+  "vault_addr": "https://vault.example.org:8200",
+  "vault_cacert": "/etc/ssl/certs/ca-certificates.crt",
+  "ca_mounts": [
+    "/etc/ssl/certs/ca-certificates.crt"
+  ],
+  "ca_env": {},
+  "deny_public_ips": [],
+  "provider_command": "/opt/agentbox/security/provider.py",
+  "policy_path": "/etc/agentbox/security.json",
+  "network_readiness": {
+    "path": "/etc/agentbox/catalog/network-ready.json"
+  },
+  "authRefs": {
+    "manager-claude": "/var/lib/agentbox-auth/manager-claude",
+    "manager-codex": "/var/lib/agentbox-auth/manager-codex",
+    "mediated-claude": "/var/lib/agentbox-auth/mediated-claude",
+    "mediated-codex": "/var/lib/agentbox-auth/mediated-codex",
+    "review-claude": "/var/lib/agentbox-auth/review-claude",
+    "review-codex": "/var/lib/agentbox-auth/review-codex"
+  },
+  "providerBindings": {
+    "manager-claude": "manager-claude",
+    "manager-codex": "manager-codex",
+    "mediated-claude": "agentbox-mediated-claude",
+    "mediated-codex": "agentbox-mediated-codex",
+    "review-claude": "agentbox-review-claude",
+    "review-codex": "agentbox-review-codex"
+  },
+  "networkBindings": {
+    "manager": {
+      "name": "agentbox-manager",
+      "subnet": "172.29.40.0/24",
+      "gateway": "172.29.40.1",
+      "bridge": "abx-manager"
+    },
+    "model-only": {
+      "name": "agentbox-model-only",
+      "subnet": "172.29.42.0/24",
+      "gateway": "172.29.42.1",
+      "bridge": "abx-model",
+      "internal": true
+    }
+  },
+  "proxyBindings": {
+    "model-only": {
+      "port": 3128,
+      "caFile": "/etc/agentbox/model-egress-ca.pem"
+    }
+  },
+  "egress_service": "agentbox-egress",
+  "network_command": [
+    "/usr/bin/python3",
+    "/opt/agentbox/security/network.py"
+  ]
+}
