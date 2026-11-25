@@ -172,7 +172,8 @@ fronting rejection, token cleanup and the browser's rendering/click/screenshot
 workflow. These observations do not prove another host's firewall or deployment.
 
 [The installation guide](docs/installation.md#verification) gives the reproducible
-browser smoke command. CI also scans Git history with pinned Gitleaks. Never
+browser smoke command. Run tests and Git-history secret scans locally before
+pushing. This repository uses local verification without GitHub Actions. Never
 commit login files, CA private keys, generated policy/state or private handoffs.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and protocol upgrades.
 

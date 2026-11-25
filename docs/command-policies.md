@@ -190,10 +190,13 @@ container. It verifies the actual tools presented to the model and command/revie
 roundtrips for both harnesses. It needs no real API key, provider login or internet:
 
 ```bash
+# The Linux builder matches the host account UID/GID.
+agent_uid=$(id -u)
+agent_gid=$(id -g)
 docker run --rm --init --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true --memory 2g --pids-limit 256 \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=256m \
-  --tmpfs /home/agent:rw,nosuid,nodev,mode=0700,size=256m,uid=1000,gid=1000 \
+  --tmpfs "/home/agent:rw,nosuid,nodev,mode=0700,size=256m,uid=$agent_uid,gid=$agent_gid" \
   --mount type=bind,source="$PWD",target=/opt/fixture,readonly \
   --entrypoint python3 agentbox/ephemeral:local \
   /opt/fixture/tests/harness_command_smoke.py

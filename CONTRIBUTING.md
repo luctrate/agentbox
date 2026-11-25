@@ -13,8 +13,9 @@ node --check images/research-browser/research-browser.cjs
 ```
 
 Tests use temporary fixtures and fake Docker/Vault commands. They do not need
-real credentials or a running Docker daemon. GitHub Actions runs them on
-Linux and macOS. Preserve compatibility with stock macOS Bash 3.2.
+real credentials or a running Docker daemon. Run the checks locally before
+every push. This hobby project uses local verification without GitHub Actions.
+Preserve compatibility with Linux and stock macOS Bash 3.2.
 
 When changing a provider protocol, verify both Claude's SDK stream and Codex's
 app-server JSON-RPC. Preserve MCP capability headers and avoid rewriting task
@@ -43,5 +44,5 @@ gitleaks git --redact=100 --log-opts='--all'
 git archive HEAD | tar -tf -
 ```
 
-CI scans history with a pinned, checksum-verified Gitleaks binary. Do not blanket
-allowlist the tests directory; fixture code can leak real credentials too.
+Run secret scans locally before publishing. Do not blanket allowlist the tests
+directory; fixture code can leak real credentials too.
